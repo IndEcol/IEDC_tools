@@ -1,0 +1,6 @@
+# Ignore these files because they may be a potential security issue
+
+IEDC_pass.py
+IEDC_paths.py
+debug.py
+.idea/
