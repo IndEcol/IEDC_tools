@@ -2,5 +2,8 @@
 
 IEDC_pass.py
 IEDC_paths.py
+
+# Other stuff to ignore
+
 debug.py
 .idea/

@@ -23,10 +23,12 @@ Credits: Niko Heeren, Stefan Pauliuk
 
 ## TODO
 
-- [ ] Routine for creating a custom classification
 - [ ] Routine for data upload
+- [ ] Function to (chain-) delete classifications from `classification_definitions` *and* `classification_items`
+- [ ] Walkthrough documentation (maybe jupyter notebook)
 
-- [x] Convenience function to pull classification attributes together
+- [x] Routine for creating a custom classification
+- [x] Convenience function to pull classification attributes together
 - [x] Create repo
 - [x] Validation function to check if all aspects exist in the database
 - [x] Validation function to check if attributes are present in the DB

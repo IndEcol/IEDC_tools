@@ -1,3 +1,7 @@
+"""
+Functions for file input-output operations.
+"""
+
 import os
 
 import pandas as pd

@@ -46,19 +46,70 @@ def db_conn(fn):
     return db_conn_
 
 
+
+def db_cursor_write(fn):
+    """
+    Decorator function for the database cursor (writing)
+    http://initd.org/psycopg/articles/2010/10/22/passing-connections-functions-using-decorator/
+    """
+
+    def db_cursor_write_(*args, **kwargs):
+        conn = pymysql.connect(host=IEDC_pass.IEDC_server,
+                               port=IEDC_pass.IEDC_port,
+                               user=IEDC_pass.IEDC_user,
+                               passwd=IEDC_pass.IEDC_pass,
+                               db=IEDC_pass.IEDC_database,
+                               charset="utf8")
+        curs = conn.cursor()
+        try:
+            #print curs, args, kwargs
+            rv = fn(curs, *args, **kwargs)
+        except (KeyboardInterrupt, SystemExit):
+            #print args, kwargs
+            conn.rollback()
+            conn.close()
+            print("Keyboard interupt - don't worry connection was closed")
+            raise
+        except BaseException as error:
+            #print args, kwargs
+            conn.rollback()
+            conn.close()
+            print("Exception: %s" % error)
+            print ("But I was smart and closed the connection!")
+            raise
+        else:
+            conn.commit()
+            curs.close()
+        return rv
+    return db_cursor_write_
+
+
 @db_conn
-def get_sql_as_df(conn, table, db=IEDC_pass.IEDC_database, addSQL=''):
+def get_sql_table_as_df(conn, table, columns=['*'], db=IEDC_pass.IEDC_database,
+                        index='id', addSQL=''):
     """
     Download a table from the SQL database and return it as a nice dataframe.
 
     :param conn: Database connection. No need to worry. The decorator takes care of this.
     :param table: table name
+    :param columns: List of columns to get from the SQL table
     :param db: database name
+    :param index: Column name to be used as dataframe index. String.
     :param addSQL: Add more arguments to the SQL query, e.g. "WHERE classification_id = 1"
     :return: Dataframe of SQL table
     """
     # Don't show this to anybody, please. SQL injections are a big nono...
     # https://www.w3schools.com/sql/sql_injection.asp
-    df = pd.read_sql("SELECT * FROM %s.%s %s;" % (db, table, addSQL),
-                     conn, index_col='id')
+    columns = ', '.join(c for c in columns if c not in "'[]")
+    df = pd.read_sql("SELECT %s FROM %s.%s %s;" % (columns, db, table, addSQL),
+                     conn, index_col=index)
     return df
+
+
+@db_cursor_write
+def dict_sql_insert(curs, table, d):
+    # https://stackoverflow.com/a/14834646/2075003
+    placeholder = ", ".join(["%s"] * len(d))
+    sql = "INSERT INTO `{table}` ({columns}) VALUES ({values});".format(table=table, columns=",".join(d.keys()),
+                                                                        values=placeholder)
+    curs.execute(sql, list(d.values()))
