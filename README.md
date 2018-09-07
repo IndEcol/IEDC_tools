@@ -23,10 +23,11 @@ Credits: Niko Heeren, Stefan Pauliuk
 
 ## TODO
 
+- [ ] Double check the uploaded data
 - [ ] Routine to apply for entire directory
-- [ ] Walkthrough documentation (maybe jupyter notebook)
 - [ ] Function to (chain-) delete classifications from `classification_definitions` *and* `classification_items`
 
+- [x] Walkthrough documentation (maybe jupyter notebook)
 - [x] Routine for data upload
 - [x] Function to add user to users table
 - [x] Function to add licenses to licenses table

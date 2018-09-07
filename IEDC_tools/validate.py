@@ -9,50 +9,6 @@ import pandas as pd
 from IEDC_tools import dbio, file_io, __version__
 
 
-def aspect_in_db(file, verbose=False):
-    """
-    Checks if all aspects that are specified in the data template file (cells F12 and below) are actually defined in
-    the database (table aspects).
-    :param file: Candidate data file name. String.
-    :param verbose: Provides some debugging output
-    :return: None. Does only assert.
-    """
-    meta = file_io.read_candidate_meta(file)
-    file_aspects = meta['classifications'].index
-    db_aspects = dbio.get_sql_table_as_df('aspects')['aspect'].values
-    for aspect in file_aspects:
-        assert aspect in db_aspects, "The aspect '%s' was not found in the database." % (aspect,)
-        if verbose:
-            print("'%s' found in aspects table" % aspect)
-
-
-def valid_attribute(file):
-    """
-    Checks if all attributes of a non-custom classification exist in the database (table classification_items).
-    :return:
-    """
-    file_data = file_io.read_candidate_data(file)
-    aspect_table = get_aspects_table(file)
-    # aspect_table = aspect_table[aspect_table['classification_id'] != 'custom']
-    for aspect in aspect_table.index:
-        # This is the classification id value for the 'aspect_x_classification' key in dataset information.
-        # It will be used to look up the values from the classification_items table.
-        classification_id = aspect_table.loc[aspect, 'classification_id']
-        # Get the attribute number to select the right column (e.g. attribute2) from the classification_items table
-        attrib_no = aspect_table.loc[aspect, 'attribute_no']
-        attrib_name = aspect_table.loc[aspect, 'name']
-        # Get all possible values from the classification_items table.
-        # For better performance this could be taken out of the loop and looked up from a dataframe.
-        db_attributes = dbio.get_sql_table_as_df('classification_items',
-                                                 addSQL="WHERE classification_id = %s" % classification_id)
-        # Select the candidates from above's query
-        checkme = db_attributes["attribute" + str(attrib_no)].values
-        # Now go through all unique items in the database file and see if it is contained in
-        #   the classification_items table.
-        for attribute in file_data[attrib_name].unique():
-            assert str(attribute) in checkme, "'%s' not in %s" % (attribute, checkme)
-
-
 def get_aspects_table(file):
     """
     Pulls the info on classification and attributes together, i.e. make sense of the messy attributes in an actual
@@ -107,7 +63,8 @@ def get_class_names(file):
 def check_classification_definition(class_names, crash=True, warn=True,
                                     custom_only=False, exclude_custom=False):
     """
-    Checks if custom classifications exists in the database (classification_definition).
+    Checks if classifications exists in the database, i.e. classification_definition.
+
     :param class_names: List of classification names
     :param crash: Strongly recommended -- will cause the script to stop if the classification already exists. Otherwise
     there could be ambiguous classifications with multiple IDs.
@@ -141,7 +98,7 @@ def check_classification_definition(class_names, crash=True, warn=True,
 def check_classification_items(class_names, file_data, crash=True, warn=True,
                                custom_only=False, exclude_custom=False):
     """
-    Uploads the actual data from the Excel template file (sheet Values_Master) into the database.
+    Checks in classification_items if a. all classification_ids exists and b. all attributes exist
 
     :param class_names: List of classification names
     :param file_data: Dataframe of Excel file, sheet `Values_Master`
@@ -190,7 +147,7 @@ def check_classification_items(class_names, file_data, crash=True, warn=True,
                 if crash:
                     raise AssertionError("'%s' already in %s" % (attribute, checkme))
                 elif warn:
-                    print("WARNING: '%s' already in %s" % (attribute, checkme))
+                    print("WARNING: '%s' already in classification_items" % attribute)
             else:
                 exists.append(False)
     return exists
@@ -199,6 +156,7 @@ def check_classification_items(class_names, file_data, crash=True, warn=True,
 def create_db_class_defs(file):
     """
     Writes the custom classification to the table classification_definition.
+
     :param file: The data file to read.
     TODO: Discuss UNIQUE database constraint with Stefan
     """
@@ -222,11 +180,10 @@ def create_db_class_defs(file):
               class_names.loc[aspect, 'custom_name'])
 
 
-@dbio.db_cursor_write
-def create_db_class_items(curs, file, crash=True):
+def create_db_class_items(file):
     """
     Writes the unique database items / attributes of a custom classification to the database.
-    :param curs: Database cursor. The decorator takes care of this
+
     :param file: Data file to read
     """
     class_names = get_class_names(file)
@@ -284,6 +241,7 @@ def upload_data(file, crash=True):
     """
     Uploads the actual data from the Excel template file (sheet Values_Master) into the database.
     :param file: Name of the file to read. String.
+    :param crash: Will stop if an error occurs
     :return:
     """
     class_names = get_class_names(file)
@@ -347,6 +305,7 @@ def upload_data(file, crash=True):
     # look up values in classification_items
     test = data.values.tolist()
     dbio.bulk_sql_insert('data', sql_columns, data.values.tolist())
+    print("Wrote data for '%s'" % dataset_name)
 
 
 
