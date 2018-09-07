@@ -113,3 +113,21 @@ def dict_sql_insert(curs, table, d):
     sql = "INSERT INTO `{table}` ({columns}) VALUES ({values});".format(table=table, columns=",".join(d.keys()),
                                                                         values=placeholder)
     curs.execute(sql, list(d.values()))
+
+@db_cursor_write
+def bulk_sql_insert(curs, table, cols, data):
+    """
+
+    :param curs:
+    :param table:
+    :param cols:
+    :param data: data as list
+    :return:
+    """
+    sql = """
+          INSERT INTO %s
+          (%s)
+          VALUES (%s);
+          """ % (table, ', '.join(cols), ','.join([' %s' for _ in cols]))
+    curs.executemany(sql, data)
+
