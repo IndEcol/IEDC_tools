@@ -21,11 +21,12 @@ def read_input_file(file):
     return df
 
 
-def get_candidate_filenames(path=IEDC_paths.candidates):
+def get_candidate_filenames(path=IEDC_paths.candidates, verbose=False):
     """
     Browses a directory and returns the filenames as a list.
 
     :param path: The directory of the files to be scanned
+    :param verbose: Print some info. Options are 1 (count) and 2 (all names)
     :return: List of filenames
     """
     # Let's exclude temporary and hidden files
@@ -33,6 +34,10 @@ def get_candidate_filenames(path=IEDC_paths.candidates):
     exclude_first_letter = ['.', '~']
     files = os.listdir(path)
     files = [f for f in files if not any([f.startswith(ex) for ex in exclude_first_letter])]
+    if verbose == 1:
+        print("Found %s candidate files in %s" % (len(files), path))
+    elif verbose == 2:
+        print("Found the following %s candidate files: %s" % (len(files), files))
     return files
 
 
@@ -77,6 +82,6 @@ def read_candidate_files(path=IEDC_paths.candidates):
     :return: TODO: List of dataframes?
     """
     for file in get_candidate_filenames(path):
-        read_candidate_file(file, path)
+        read_candidate_data(file, path)
     # TODO
     return None
