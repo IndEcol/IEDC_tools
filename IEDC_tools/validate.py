@@ -295,7 +295,6 @@ def upload_data(file, crash=True):
     data = file_data[df_columns]
     # Now for the super tedious replacement of names with ids...
     for n, aspect in enumerate(class_names.index):
-        pass
         db_classitems2 = db_classitems[db_classitems['classification_id'] == class_ids[n]]
         attribute_no = class_names.loc[aspect, 'attribute_no']
         if attribute_no == 'custom':
@@ -310,14 +309,26 @@ def upload_data(file, crash=True):
                                                                                str(int(attribute_no)), how='left')
         data[class_name] = tmp['i']
 
-    for u in ('unit nominator', 'unit denominator'):
-        assert all([i in db_units['unitcode'].values for i in file_data[u].unique()]), "Not all units exist in units table"
-        tmp = file_data.merge(db_units, left_on=u, right_on='unitcode', how='left')
+    for nom_denom in ('unit nominator', 'unit denominator'):
+        # check if all units present in one of the units columns
+        for unit in file_data[nom_denom].unique():
+            if str(unit) in db_units['unitcode'].values:
+                merge_col = 'unitcode'
+            elif str(unit) in db_units['alt_unitcode'].values:
+                merge_col = 'alt_unitcode'
+            elif str(unit) in db_units['alt_unitcode2'].values:
+                merge_col = 'alt_unitcode2'
+            else:
+                raise AssertionError("The following unit is not in units table: %s" %
+                                     set(file_data[nom_denom].unique()).difference(db_units['unitcode'].values))
+        file_data[nom_denom] = file_data[nom_denom].apply(str)
+        tmp = file_data.merge(db_units, left_on=nom_denom, right_on=merge_col, how='left')
         assert not any(tmp['id'].isnull()), "The following units do not exist in the units table: %s" % \
-                                            file_data[tmp['id'].isnull()][u].unique()
-        data[u] = tmp['id']
+                                            file_data[tmp['id'].isnull()][nom_denom].unique()
+        data[nom_denom] = tmp['id']
     # clean up some more mess
     data = data.replace(['none'], [None])
+    data = data.replace([np.nan], [None])
     # TODO: Megatons missing from units table. Someone needs to fix
     # look up values in classification_items
     test = data.values.tolist()
