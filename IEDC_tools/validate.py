@@ -250,6 +250,27 @@ def add_license(file, quiet=False):
         print("Licence '%s' written to db table 'licences'" % file_licence)
 
 
+def parse_stats_array(stats_array_strings):
+    """
+    Parses the 'stats_array string' from the Excel template. E.g. "3;10;3.0;none;" should fill the respecitve columns
+     in the data table as follows: stats_array_1 = 3, stats_array_2 = 10, stats_array_3 = 3.0, stats_array_4 = none
+    More info: https://github.com/IndEcol/IE_data_commons/issues/14
+    :param stats_array_strings:
+    :return:
+    """
+    temp_list = []
+    for sa_string in stats_array_strings:
+        if sa_string == 'none':
+            temp_list.append([None] * 4)
+            continue
+        # TODO: [:-1] may have to be removed later, see https://github.com/IndEcol/IE_data_commons/issues/14
+        temp_list.append(sa_string[:-1].split(';'))
+    return_df = pd.DataFrame(temp_list)
+    return_df = return_df.replace(['none'], [None])
+    # return a list of lists
+    return [return_df[i].values for i in range(len(return_df.columns))]
+
+
 def upload_data(file, crash=True):
     """
     Uploads the actual data from the Excel template file (sheet Values_Master) into the database.
@@ -286,8 +307,9 @@ def upload_data(file, crash=True):
     assert dataset_id not in db_data_ids, \
         "The database already contains values for dataset_id '%s' in the 'data' table" % dataset_id
     # TODO: There is a bad mismatch between Excel templates and the db's data table. Ugly code ahead.
-    more_df_columns = ['value', 'unit nominator', 'unit denominator', 'stats_array string', 'comment']
-    more_sql_columns = ['value', 'unit_nominator', 'unit_denominator', 'stats_array_1', 'comment']
+    more_df_columns = ['value', 'unit nominator', 'unit denominator', 'comment']
+    more_sql_columns = ['value', 'unit_nominator', 'unit_denominator', 'stats_array_1', 'stats_array_2',
+                        'stats_array_3', 'stats_array_4', 'comment']
     file_data['dataset_id'] = dataset_id
     df_columns = ['dataset_id'] + class_names['name'].values.tolist() + more_df_columns
     sql_columns = ['dataset_id'] + [a.replace('_','') for a in class_names.index] + more_sql_columns
@@ -326,14 +348,17 @@ def upload_data(file, crash=True):
         assert not any(tmp['id'].isnull()), "The following units do not exist in the units table: %s" % \
                                             file_data[tmp['id'].isnull()][nom_denom].unique()
         data[nom_denom] = tmp['id']
+    # parse the stats_array_string column
+    [data.insert(len(data.columns)-1, 'stats_array_%s' % str(n+1), l) for n, l in
+     enumerate(parse_stats_array(file_data['stats_array string']))]
+    # data['stats_array_1'], data['stats_array_2'], data['stats_array_3'], data['stats_array_4'] = \
+    #     parse_stats_array(file_data['stats_array string'])
     # clean up some more mess
     data = data.replace(['none'], [None])
     data = data.replace([np.nan], [None])
-    # TODO: Megatons missing from units table. Someone needs to fix
     # look up values in classification_items
-    test = data.values.tolist()
     dbio.bulk_sql_insert('data', sql_columns, data.values.tolist())
-    print("Wrote data for '%s'" % dataset_name)
+    print("Wrote data for '%s', dataset_id: %s" % (dataset_name, dataset_id))
 
 
 
