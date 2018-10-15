@@ -322,13 +322,10 @@ def upload_data(file, crash=True):
         if attribute_no == 'custom':
             attribute_no = 1
         class_name = class_names.loc[aspect, 'name']
-        try:
-            tmp = file_data.merge(db_classitems2, left_on=class_name, right_on='attribute%s_oto' %
+        file_data[class_name] = file_data[class_name].apply(str)
+        tmp = file_data.merge(db_classitems2, left_on=class_name, right_on='attribute%s_oto' %
                                                                                str(int(attribute_no)), how='left')
-        except ValueError:
-            file_data[class_name] = file_data[class_name].apply(str)
-            tmp = file_data.merge(db_classitems2, left_on=class_name, right_on='attribute%s_oto' %
-                                                                               str(int(attribute_no)), how='left')
+        # TODO: Causes annoying warning in Pandas. Not sure if relevant: https://stackoverflow.com/q/20625582/2075003
         data[class_name] = tmp['i']
 
     for nom_denom in ('unit nominator', 'unit denominator'):
@@ -347,6 +344,7 @@ def upload_data(file, crash=True):
         tmp = file_data.merge(db_units, left_on=nom_denom, right_on=merge_col, how='left')
         assert not any(tmp['id'].isnull()), "The following units do not exist in the units table: %s" % \
                                             file_data[tmp['id'].isnull()][nom_denom].unique()
+        # TODO: Causes annoying warning in Pandas. Not sure if relevant: https://stackoverflow.com/q/20625582/2075003
         data[nom_denom] = tmp['id']
     # parse the stats_array_string column
     [data.insert(len(data.columns)-1, 'stats_array_%s' % str(n+1), l) for n, l in
