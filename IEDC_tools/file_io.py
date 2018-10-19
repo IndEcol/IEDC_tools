@@ -33,7 +33,10 @@ def get_candidate_filenames(path=IEDC_paths.candidates, verbose=False):
     # TODO: Will probably need more love for Windows...
     exclude_first_letter = ['.', '~']
     files = os.listdir(path)
+    # discard hidden files, etc.
     files = [f for f in files if not any([f.startswith(ex) for ex in exclude_first_letter])]
+    # only consider Excel files
+    files = [f for f in files if f.endswith('.xlsx')]
     if verbose == 1:
         print("Found %s candidate files in %s" % (len(files), path))
     elif verbose == 2:

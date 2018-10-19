@@ -262,9 +262,9 @@ def parse_stats_array(stats_array_strings):
     for sa_string in stats_array_strings:
         if sa_string == 'none':
             temp_list.append([None] * 4)
-            continue
-        # TODO: [:-1] may have to be removed later, see https://github.com/IndEcol/IE_data_commons/issues/14
-        temp_list.append(sa_string[:-1].split(';'))
+        else:
+            assert len(sa_string.split(';')) == 4, "The 'stats_array string' is not well formatted: %s" % sa_string
+            temp_list.append(sa_string.split(';'))
     return_df = pd.DataFrame(temp_list)
     return_df = return_df.replace(['none'], [None])
     # return a list of lists
