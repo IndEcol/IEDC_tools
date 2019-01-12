@@ -312,6 +312,30 @@ def parse_stats_array(stats_array_strings):
     return [return_df[i].values for i in range(len(return_df.columns))]
 
 
+def get_unit_list(file_data):
+    db_units = dbio.get_sql_table_as_df('units', index=None)
+    res = pd.DataFrame()
+    for nom_denom in ('unit nominator', 'unit denominator'):
+        # check if all units present in one of the units columns
+        for unit in file_data[nom_denom].unique():
+            if str(unit) in db_units['unitcode'].values:
+                merge_col = 'unitcode'
+            elif str(unit) in db_units['alt_unitcode'].values:
+                merge_col = 'alt_unitcode'
+            elif str(unit) in db_units['alt_unitcode2'].values:
+                merge_col = 'alt_unitcode2'
+            else:
+                raise AssertionError("The following unit is not in units table: %s" %
+                                     set(file_data[nom_denom].unique()).difference(db_units['unitcode'].values))
+        file_data[nom_denom] = file_data[nom_denom].apply(str)
+        tmp = file_data.merge(db_units, left_on=nom_denom, right_on=merge_col, how='left')
+        assert not any(tmp['id'].isnull()), "The following units do not exist in the units table: %s" % \
+                                            file_data[tmp['id'].isnull()][nom_denom].unique()
+        # TODO: Causes annoying warning in Pandas. Not sure if relevant: https://stackoverflow.com/q/20625582/2075003
+        res[nom_denom] = tmp['id']
+    return res
+
+
 def upload_data_list(file_meta, aspect_table, file_data, crash=True):
     """
     Uploads the actual data from the Excel template file (sheet Data) into the database.
@@ -321,7 +345,6 @@ def upload_data_list(file_meta, aspect_table, file_data, crash=True):
     """
     class_names = get_class_names(file_meta, aspect_table)
     db_classdef = dbio.get_sql_table_as_df('classification_definition')
-    db_units = dbio.get_sql_table_as_df('units', index=None)
     class_ids = [db_classdef[db_classdef['classification_name'] == i].index[0] for i
                  in class_names['custom_name'].values]
     db_classitems = dbio.get_sql_table_as_df('classification_items', addSQL="WHERE classification_id IN (%s)" %
@@ -365,27 +388,10 @@ def upload_data_list(file_meta, aspect_table, file_data, crash=True):
         file_data[class_name] = file_data[class_name].apply(str)
         tmp = file_data.merge(db_classitems2, left_on=class_name, right_on='attribute%s_oto' %
                                                                                str(int(attribute_no)), how='left')
-        # TODO: Causes annoying warning in Pandas. Not sure if relevant: https://stackoverflow.com/q/20625582/2075003
-        data[class_name] = tmp['i']
-
-    for nom_denom in ('unit nominator', 'unit denominator'):
-        # check if all units present in one of the units columns
-        for unit in file_data[nom_denom].unique():
-            if str(unit) in db_units['unitcode'].values:
-                merge_col = 'unitcode'
-            elif str(unit) in db_units['alt_unitcode'].values:
-                merge_col = 'alt_unitcode'
-            elif str(unit) in db_units['alt_unitcode2'].values:
-                merge_col = 'alt_unitcode2'
-            else:
-                raise AssertionError("The following unit is not in units table: %s" %
-                                     set(file_data[nom_denom].unique()).difference(db_units['unitcode'].values))
-        file_data[nom_denom] = file_data[nom_denom].apply(str)
-        tmp = file_data.merge(db_units, left_on=nom_denom, right_on=merge_col, how='left')
-        assert not any(tmp['id'].isnull()), "The following units do not exist in the units table: %s" % \
-                                            file_data[tmp['id'].isnull()][nom_denom].unique()
-        # TODO: Causes annoying warning in Pandas. Not sure if relevant: https://stackoverflow.com/q/20625582/2075003
-        data[nom_denom] = tmp['id']
+        data.loc[:, class_name] = tmp['i']
+    units = get_unit_list(file_data)
+    data['unit nominator'] = units['unit nominator']
+    data['unit denominator'] = units['unit denominator']
     # parse the stats_array_string column
     [data.insert(len(data.columns)-1, 'stats_array_%s' % str(n+1), l) for n, l in
      enumerate(parse_stats_array(file_data['stats_array string']))]
@@ -399,7 +405,49 @@ def upload_data_list(file_meta, aspect_table, file_data, crash=True):
     print("Wrote data for '%s', dataset_id: %s" % (dataset_name, dataset_id))
 
 
-def upload_data_table(file_meta, aspect_table, file_data, crash=True):
+def get_unit_table(file, file_meta, row_indices, col_indices, ordered_index):
+    db_units = dbio.get_sql_table_as_df('units', index=None)
+    # first method for LIST type data and also for certain TABLE type
+    if file_meta['data_sources'].loc['Dataset_Unit', 'a'] == 'GLOBAL':
+        for nom_denom in ('u_nominator', 'u_denominator'):
+            if str(file_meta[nom_denom]) == '1.0':
+                file_meta[nom_denom] = '1'
+            # check if all units present in one of the units columns
+            if str(file_meta[nom_denom]) in db_units['unitcode'].values:
+                merge_col = 'unitcode'
+            elif str(file_meta[nom_denom]) in db_units['alt_unitcode'].values:
+                merge_col = 'alt_unitcode'
+            elif str(file_meta[nom_denom]) in db_units['alt_unitcode2'].values:
+                merge_col = 'alt_unitcode2'
+            else:
+                raise AssertionError("The following unit is not in units table: %s" % file_meta[nom_denom])
+            file_meta[nom_denom] = str(file_meta[nom_denom])
+        return {'nominator': int(db_units.loc[db_units[merge_col] == file_meta[nom_denom]]['id']),
+                'denominator': int(db_units.loc[db_units[merge_col] == file_meta[nom_denom]]['id'])}
+    elif file_meta['data_sources'].loc['Dataset_Unit', 'a'] == 'TABLE':
+        units = file_io.read_units_table(file, row_indices, col_indices)
+        units = units.reset_index().melt(units.index.names)
+        units = units.set_index(row_indices)
+        for u in units['value'].unique():
+            # check if all units present in one of the units columns
+            if str(u) in db_units['unitcode'].values:
+                merge_col = 'unitcode'
+            elif str(u) in db_units['alt_unitcode'].values:
+                merge_col = 'alt_unitcode'
+            elif str(u) in db_units['alt_unitcode2'].values:
+                merge_col = 'alt_unitcode2'
+            else:
+                raise AssertionError("The following unit is not in units table: %s" % u)
+            units.loc[units['value'] == u, 'icol'] = int(db_units.loc[db_units[merge_col] == u]['id'])
+        res = pd.DataFrame(index=ordered_index.set_index(row_indices).index)
+        res['nominator'] = units['value']
+        res['icol'] = units['icol']
+    return {'nominator': units,
+            # TODO: https://github.com/IndEcol/IE_data_commons/issues/17
+            'denominator': int(db_units.loc[db_units['unitcode'] == '1']['id'])}
+
+
+def upload_data_table(file, file_meta, aspect_table, file_data, crash=True):
     """
     Uploads the actual data from the Excel template file (sheet Data) into the database.
     :param file: Name of the file to read. String.
@@ -408,7 +456,6 @@ def upload_data_table(file_meta, aspect_table, file_data, crash=True):
     """
     class_names = get_class_names(file_meta, aspect_table)
     db_classdef = dbio.get_sql_table_as_df('classification_definition')
-    db_units = dbio.get_sql_table_as_df('units', index=None)
     class_ids = [db_classdef[db_classdef['classification_name'] == i].index[0] for i
                  in class_names['custom_name'].values]
     db_classitems = dbio.get_sql_table_as_df('classification_items', addSQL="WHERE classification_id IN (%s)" %
@@ -422,7 +469,6 @@ def upload_data_table(file_meta, aspect_table, file_data, crash=True):
     assert all(check_classification_items(class_names, file_meta, file_data,
                                           crash=False, custom_only=False, warn=False)), \
         "Not all classification_ids or attributes found in classification_items"
-    # Time to loop through the file's aspects
     dataset_name = file_meta['dataset_info'].loc['dataset_name', 'Dataset entries']
     dataset_id = db_datasets[db_datasets['dataset_name'] == dataset_name].index.values[0]
     if crash:
@@ -434,18 +480,13 @@ def upload_data_table(file_meta, aspect_table, file_data, crash=True):
     assert dataset_id not in db_data_ids, \
         "The database already contains values for dataset_id '%s' in the 'data' table" % dataset_id
     # TODO: There is a bad mismatch between Excel templates and the db's data table. Ugly code ahead.
-    more_df_columns = ['value']
     more_sql_columns = ['value', 'unit_nominator', 'unit_denominator', 'stats_array_1', 'stats_array_2',
                         'stats_array_3', 'stats_array_4', 'comment']
-    df_columns = ['dataset_id'] + class_names['name'].values.tolist() + more_df_columns
     sql_columns = ['dataset_id'] + [a.replace('_', '') for a in class_names.index] + more_sql_columns
     # sql_columns = [a + '_oto' if a.startswith('aspect') else a for a in sql_columns]
-    if file_meta['data_type'] == 'LIST':
-        data = file_data[df_columns]
-    elif file_meta['data_type'] == 'TABLE':
-        # Gotta love Pandas: http://pandas.pydata.org/pandas-docs/stable/generated/pandas.melt.html
-        # https://stackoverflow.com/q/53464475/2075003
-        data = file_data.reset_index().melt(file_data.index.names)
+    # Gotta love Pandas: http://pandas.pydata.org/pandas-docs/stable/generated/pandas.melt.html
+    # https://stackoverflow.com/q/53464475/2075003
+    data = file_data.reset_index().melt(file_data.index.names)
     data.insert(0, 'dataset_id', dataset_id)
     # Now for the super tedious replacement of names with ids...
     for n, aspect in enumerate(class_names.index):
@@ -454,49 +495,31 @@ def upload_data_table(file_meta, aspect_table, file_data, crash=True):
         if attribute_no == 'custom':
             attribute_no = 1
         class_name = class_names.loc[aspect, 'name']
-        if file_meta['data_type'] == 'LIST':
-            file_data[class_name] = file_data[class_name].apply(str)
-        elif file_meta['data_type'] == 'TABLE':
-            if class_names.loc[aspect, 'position'][:3] == 'col':
-                if len(file_meta['col_classifications'].values) == 1:
-                    # That means there is only one column level defined, i.e. no MultiIndex
-                    file_data.columns = [str(c) for c in file_data.columns]
-                else:
-                    file_data.columns.set_levels(
-                        [str(i) for i in file_data.columns.levels[file_data.columns.names.index(class_name)]],
-                        level=file_data.columns.names.index(class_name), inplace=True)
-            elif class_names.loc[aspect, 'position'][:3] == 'row':
-                if len(file_meta['row_classifications'].values) == 1:
-                    file_data.index = [str(c) for c in file_data.index]
-                else:
-                    file_data.index.set_levels(
-                        [str(i) for i in file_data.index.levels[file_data.index.names.index(class_name)]],
-                        level=file_data.index.names.index(class_name), inplace=True)
+        if class_names.loc[aspect, 'position'][:3] == 'col':
+            if len(file_meta['col_classifications'].values) == 1:
+                # That means there is only one column level defined, i.e. no MultiIndex
+                file_data.columns = [str(c) for c in file_data.columns]
+            else:
+                file_data.columns.set_levels(
+                    [str(i) for i in file_data.columns.levels[file_data.columns.names.index(class_name)]],
+                    level=file_data.columns.names.index(class_name), inplace=True)
+        elif class_names.loc[aspect, 'position'][:3] == 'row':
+            if len(file_meta['row_classifications'].values) == 1:
+                file_data.index = [str(c) for c in file_data.index]
+            else:
+                file_data.index.set_levels(
+                    [str(i) for i in file_data.index.levels[file_data.index.names.index(class_name)]],
+                    level=file_data.index.names.index(class_name), inplace=True)
         # Make sure the columns that will be used to match have the same data type
-        db_classitems2.loc[:, 'attribute%s_oto' % str(int(attribute_no))] = \
-            db_classitems2.loc[:, 'attribute%s_oto' % str(int(attribute_no))].astype(data[class_name].dtype)
+        data[class_name] = data[class_name].astype(str)
         tmp = data.merge(db_classitems2, left_on=class_name,
                          right_on='attribute%s_oto' % str(int(attribute_no)), how='left')
-        # TODO: Causes annoying warning in Pandas. Not sure if relevant: https://stackoverflow.com/q/20625582/2075003
-        data[class_name] = tmp['i']
-
-    for nom_denom in ('u_nominator', 'u_denominator'):
-        if str(file_meta[nom_denom]) == '1.0':
-            file_meta[nom_denom] = '1'
-        # check if all units present in one of the units columns
-        if str(file_meta[nom_denom]) in db_units['unitcode'].values:
-            merge_col = 'unitcode'
-        elif str(file_meta[nom_denom]) in db_units['alt_unitcode'].values:
-            merge_col = 'alt_unitcode'
-        elif str(file_meta[nom_denom]) in db_units['alt_unitcode2'].values:
-            merge_col = 'alt_unitcode2'
-        else:
-            raise AssertionError("The following unit is not in units table: %s" % file_meta[nom_denom])
-        file_meta[nom_denom] = str(file_meta[nom_denom])
-        if nom_denom == 'u_nominator':
-            data['unit_nominator'] = int(db_units.loc[db_units[merge_col] == file_meta[nom_denom]]['id'])
-        elif nom_denom == 'u_denominator':
-            data['unit_denominator'] = int(db_units.loc[db_units[merge_col] == file_meta[nom_denom]]['id'])
+        assert not any(pd.isna(tmp['i'])), "The correct classification could not be found for '%s'" % class_name
+        data.loc[:, class_name] = tmp['i']
+    units = get_unit_table(file, file_meta, file_data.index.names, file_data.columns.names,
+                           file_data.reset_index().melt(file_data.index.names)[file_data.index.names])
+    data['unit_nominator'] = units['nominator']['icol'].apply(int).values
+    data['unit_denominator'] = units['denominator']
     # parse the stats_array_string column
     # [data.insert(len(data.columns)-1, 'stats_array_%s' % str(n+1), l) for n, l in
     #  enumerate(parse_stats_array(file_data['stats_array string']))]

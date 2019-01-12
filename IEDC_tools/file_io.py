@@ -65,6 +65,10 @@ def read_candidate_meta(file, path=IEDC_paths.candidates):
     # Get dataset information table on Cover sheet
     dataset_info = pd.read_excel(file, sheet_name='Cover', usecols='C:D',
                          skiprows=[0, 1], index_col="Column name")
+    # The `data_sources` metadata should be in the same position for both TABLE and LIST, i.e. F6:H9
+    data_sources = pd.read_excel(file, sheet_name='Cover', usecols='F:H',
+                                 skiprows=[i for i in range(5)], index_col=0, nrows=4,
+                                 header=None, names=['a', 'b'])
     # Excel templates should be unified for both types in the future :(
     if data_type == 'TABLE':
         row_classifications = pd.read_excel(file, sheet_name='Cover', usecols='F:G',
@@ -96,6 +100,7 @@ def read_candidate_meta(file, path=IEDC_paths.candidates):
     workbook.release_resources()
     return {'data_type': data_type,
             'dataset_info': dataset_info,
+            'data_sources': data_sources,
             'row_classifications': row_classifications,
             'col_classifications': col_classifications,
             'data_info': data_info,
@@ -125,15 +130,24 @@ def read_candidate_data_table(file, aspects_table, path=IEDC_paths.candidates):
     :param path: Path of the file
     :return: Dictionary of dataframes for metadata, classifications, and data
     """
-    # make it a proper path
     row_indices = aspects_table[aspects_table['position'].str.startswith('row')].sort_values('position')['name']
     col_indices = aspects_table[aspects_table['position'].str.startswith('col')].sort_values('position')['name']
+    # make it a proper path
     file = os.path.join(path, file)
     data = pd.read_excel(file, sheet_name='Data', header=[i for i in range(len(col_indices))],
                          index_col=[i for i in range(len(row_indices))])
     data.columns.names = col_indices
     data.index.names = row_indices
     return data
+
+
+def read_units_table(file, row_indices, col_indices, path=IEDC_paths.candidates):
+    file = os.path.join(path, 'TABLE', file)
+    units = pd.read_excel(file, sheet_name='Unit', header=[i for i in range(len(col_indices))],
+                          index_col=[i for i in range(len(row_indices))])
+    units.columns.names = col_indices
+    units.index.names = row_indices
+    return units
 
 
 def read_candidate_files(path=IEDC_paths.candidates):
