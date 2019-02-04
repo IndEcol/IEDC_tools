@@ -68,7 +68,7 @@ def read_candidate_meta(file, path=IEDC_paths.candidates):
     # The `data_sources` metadata should be in the same position for both TABLE and LIST, i.e. F6:H9
     data_sources = pd.read_excel(file, sheet_name='Cover', usecols='F:H',
                                  skiprows=[i for i in range(5)], index_col=0, nrows=4,
-                                 header=None, names=['a', 'b'])
+                                 header=None, names=['i', 'a', 'b'])
     # Excel templates should be unified for both types in the future :(
     if data_type == 'TABLE':
         row_classifications = pd.read_excel(file, sheet_name='Cover', usecols='F:G',
@@ -136,18 +136,47 @@ def read_candidate_data_table(file, aspects_table, path=IEDC_paths.candidates):
     file = os.path.join(path, file)
     data = pd.read_excel(file, sheet_name='Data', header=[i for i in range(len(col_indices))],
                          index_col=[i for i in range(len(row_indices))])
+    # Check that same column names are not interpreted once as int and once as str
+    # https://stackoverflow.com/a/54393368/2075003
+    if hasattr(data.columns, 'levels'):
+        data.columns = pd.MultiIndex.from_product([clevel.astype(str).unique() for clevel in data.columns.levels])
+    else:
+        data.columns = data.columns.astype(str).unique()
     data.columns.names = col_indices
     data.index.names = row_indices
     return data
 
 
 def read_units_table(file, row_indices, col_indices, path=IEDC_paths.candidates):
-    file = os.path.join(path, 'TABLE', file)
-    units = pd.read_excel(file, sheet_name='Unit', header=[i for i in range(len(col_indices))],
-                          index_col=[i for i in range(len(row_indices))])
-    units.columns.names = col_indices
-    units.index.names = row_indices
+    # file = os.path.join(path, 'TABLE', file)
+    file = os.path.join(path, file)
+    units = {}
+    for u in ['Unit_nominator', 'Unit_denominator']:
+        units[u] = pd.read_excel(file, sheet_name=u, header=[i for i in range(len(col_indices))],
+                                 index_col=[i for i in range(len(row_indices))])
+        units[u].columns.names = col_indices
+        units[u].index.names = row_indices
     return units
+
+
+def read_stats_array_table(file, row_indices, col_indices, path=IEDC_paths.candidates):
+    # file = os.path.join(path, 'TABLE', file)
+    file = os.path.join(path, file)
+    sa_df = pd.read_excel(file, sheet_name='stats_array_string', header=[i for i in range(len(col_indices))],
+                          index_col=[i for i in range(len(row_indices))])
+    sa_df.columns.names = col_indices
+    sa_df.index.names = row_indices
+    return sa_df
+
+
+def read_comment_table(file, row_indices, col_indices, path=IEDC_paths.candidates):
+    # file = os.path.join(path, 'TABLE', file)
+    file = os.path.join(path, file)
+    sa_df = pd.read_excel(file, sheet_name='Comment', header=[i for i in range(len(col_indices))],
+                          index_col=[i for i in range(len(row_indices))])
+    sa_df.columns.names = col_indices
+    sa_df.index.names = row_indices
+    return sa_df
 
 
 def read_candidate_files(path=IEDC_paths.candidates):
