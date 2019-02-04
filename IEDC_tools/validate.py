@@ -156,7 +156,7 @@ def check_classification_items(class_names, file_meta, file_data, crash=True, wa
                       class_id)
         else:
             exists.append(False)
-            print(aspect, class_id)
+            print(aspect, class_id, 'not in classification_items')
 
         # Next check if all attributes exist
         if attrib_no == 'custom':
@@ -187,7 +187,7 @@ def check_classification_items(class_names, file_meta, file_data, crash=True, wa
                     print("WARNING: '%s' already in classification_items" % attribute)
             else:
                 exists.append(False)
-                print(aspect, attribute, class_id)
+                print(aspect, attribute, class_id, 'not in classification_items')
     return exists
 
 
@@ -291,7 +291,7 @@ def add_license(file_meta, quiet=False):
         print("Licence '%s' written to db table 'licences'" % file_licence)
 
 
-def parse_stats_array(stats_array_strings):
+def parse_stats_array_list(stats_array_strings):
     """
     Parses the 'stats_array string' from the Excel template. E.g. "3;10;3.0;none;" should fill the respecitve columns
      in the data table as follows: stats_array_1 = 3, stats_array_2 = 10, stats_array_3 = 3.0, stats_array_4 = none
@@ -310,6 +310,49 @@ def parse_stats_array(stats_array_strings):
     return_df = return_df.replace(['none'], [None])
     # return a list of lists
     return [return_df[i].values for i in range(len(return_df.columns))]
+
+
+def parse_stats_array_table(file, file_meta, row_indices, col_indices):
+    # db_sa = dbio.get_sql_table_as_df('stats_array', index=None)
+    if file_meta['data_sources'].loc['Dataset_Uncertainty', 'a'] == 'GLOBAL':
+        if file_meta['data_sources'].loc['Dataset_Uncertainty', 'b'] in ('none', 'None'):
+            sa_res = [None] * 4
+        else:
+            sa_res = file_meta['data_sources'].loc['Dataset_Uncertainty', 'b'].split(';')
+        return {'type': 'GLOBAL',
+                'data': sa_res}
+    elif file_meta['data_sources'].loc['Dataset_Uncertainty', 'a'] == 'TABLE':
+        file_sa = file_io.read_stats_array_table(file, row_indices, col_indices)
+        sa_tmp = file_sa.reset_index().melt(file_sa.index.names)
+        sa_tmp = sa_tmp.set_index(row_indices)
+        # parse the string https://stackoverflow.com/a/21032532/2075003
+        sa_res = sa_tmp['value'].str.split(';', expand=True)
+        sa_res.columns = ['stats_array_' + str(i+1) for i in range(4)]
+        sa_res = sa_res.replace(['none'], [None])
+        sa_res = sa_res.astype({'stats_array_1': int, 'stats_array_2': float,
+                                'stats_array_3': float, 'stats_array_4': float})
+        return {'type': 'TABLE',
+                'data': sa_res}
+    else:
+        raise AttributeError("Unknown data unit type specified. Must be either 'GLOBAL' or 'TABLE'.")
+
+
+def get_comment_table(file, file_meta, row_indices, col_indices):
+    if file_meta['data_sources'].loc['Dataset_Comment', 'a'] == 'GLOBAL':
+        if file_meta['data_sources'].loc['Dataset_Comment', 'b'] in ('none', 'None'):
+            comment = None
+        else:
+            comment = file_meta['data_sources'].loc['Dataset_Comment', 'b']
+        return {'type': 'GLOBAL',
+                'data': comment}
+    elif file_meta['data_sources'].loc['Dataset_Comment', 'a'] == 'TABLE':
+        comment = file_io.read_comment_table(file, row_indices, col_indices)
+        comment = comment.reset_index().melt(comment.index.names)
+        comment = comment.set_index(row_indices)
+        return {'type': 'TABLE',
+                'data': comment}
+    else:
+        raise AttributeError("Unknown data unit type specified. Must be either 'GLOBAL' or 'TABLE'.")
 
 
 def get_unit_list(file_data):
@@ -366,7 +409,7 @@ def upload_data_list(file_meta, aspect_table, file_data, crash=True):
         assert dataset_id not in db_datasets['dataset_name'], \
             "The database already contains values for dataset_id '%s' in the 'datasets' table" % dataset_id
     else:
-        print("WARNING: The database already contains values for dataset_id '%s'" % dataset_id)
+        print("WARNING: The database already contains values for dataset_id '%s' in the 'datasets' table" % dataset_id)
     assert dataset_id not in db_data_ids, \
         "The database already contains values for dataset_id '%s' in the 'data' table" % dataset_id
     # TODO: There is a bad mismatch between Excel templates and the db's data table. Ugly code ahead.
@@ -394,9 +437,9 @@ def upload_data_list(file_meta, aspect_table, file_data, crash=True):
     data['unit denominator'] = units['unit denominator']
     # parse the stats_array_string column
     [data.insert(len(data.columns)-1, 'stats_array_%s' % str(n+1), l) for n, l in
-     enumerate(parse_stats_array(file_data['stats_array string']))]
+     enumerate(parse_stats_array_list(file_data['stats_array string']))]
     # data['stats_array_1'], data['stats_array_2'], data['stats_array_3'], data['stats_array_4'] = \
-    #     parse_stats_array(file_data['stats_array string'])
+    #     parse_stats_array_list(file_data['stats_array string'])
     # clean up some more mess
     data = data.replace(['none'], [None])
     data = data.replace([np.nan], [None])
@@ -405,7 +448,7 @@ def upload_data_list(file_meta, aspect_table, file_data, crash=True):
     print("Wrote data for '%s', dataset_id: %s" % (dataset_name, dataset_id))
 
 
-def get_unit_table(file, file_meta, row_indices, col_indices, ordered_index):
+def get_unit_table(file, file_meta, row_indices, col_indices):
     db_units = dbio.get_sql_table_as_df('units', index=None)
     # first method for LIST type data and also for certain TABLE type
     if file_meta['data_sources'].loc['Dataset_Unit', 'a'] == 'GLOBAL':
@@ -422,29 +465,36 @@ def get_unit_table(file, file_meta, row_indices, col_indices, ordered_index):
             else:
                 raise AssertionError("The following unit is not in units table: %s" % file_meta[nom_denom])
             file_meta[nom_denom] = str(file_meta[nom_denom])
-        return {'nominator': int(db_units.loc[db_units[merge_col] == file_meta[nom_denom]]['id']),
-                'denominator': int(db_units.loc[db_units[merge_col] == file_meta[nom_denom]]['id'])}
+        return {'type': 'GLOBAL',
+                'nominator': int(db_units.loc[db_units[merge_col] == file_meta['u_nominator']]['id']),
+                'denominator': int(db_units.loc[db_units[merge_col] == file_meta['u_denominator']]['id'])}
     elif file_meta['data_sources'].loc['Dataset_Unit', 'a'] == 'TABLE':
-        units = file_io.read_units_table(file, row_indices, col_indices)
-        units = units.reset_index().melt(units.index.names)
-        units = units.set_index(row_indices)
-        for u in units['value'].unique():
-            # check if all units present in one of the units columns
-            if str(u) in db_units['unitcode'].values:
-                merge_col = 'unitcode'
-            elif str(u) in db_units['alt_unitcode'].values:
-                merge_col = 'alt_unitcode'
-            elif str(u) in db_units['alt_unitcode2'].values:
-                merge_col = 'alt_unitcode2'
-            else:
-                raise AssertionError("The following unit is not in units table: %s" % u)
-            units.loc[units['value'] == u, 'icol'] = int(db_units.loc[db_units[merge_col] == u]['id'])
-        res = pd.DataFrame(index=ordered_index.set_index(row_indices).index)
-        res['nominator'] = units['value']
-        res['icol'] = units['icol']
-    return {'nominator': units,
-            # TODO: https://github.com/IndEcol/IE_data_commons/issues/17
-            'denominator': int(db_units.loc[db_units['unitcode'] == '1']['id'])}
+        file_units = file_io.read_units_table(file, row_indices, col_indices)
+        units = {}
+        for nom_denom in file_units:
+            units[nom_denom] = file_units[nom_denom].reset_index().melt(file_units[nom_denom].index.names)
+            units[nom_denom] = units[nom_denom].set_index(row_indices)
+            for u in units[nom_denom]['value'].unique():
+                # check if all units present in one of the units columns
+                if str(u) in db_units['unitcode'].values:
+                    merge_col = 'unitcode'
+                elif str(u) in db_units['alt_unitcode'].values:
+                    merge_col = 'alt_unitcode'
+                elif str(u) in db_units['alt_unitcode2'].values:
+                    merge_col = 'alt_unitcode2'
+                else:
+                    raise AssertionError("The following unit is not in units table: %s" % u)
+                units[nom_denom].loc[units[nom_denom]['value'] == u, 'icol'] = \
+                    int(db_units.loc[db_units[merge_col] == u]['id'])
+            # TODO: Remove
+            #  res = pd.DataFrame(index=ordered_index.set_index(row_indices).index)
+            #  res['nominator'] = units[nom_denom]['value']
+            #  res['icol'] = units['icol']
+        return {'type': 'TABLE',
+                'nominator': units['Unit_nominator'],
+                'denominator': units['Unit_denominator']}
+    else:
+        raise AttributeError("Unknown data unit type specified. Must be either 'GLOBAL' or 'TABLE'.")
 
 
 def upload_data_table(file, file_meta, aspect_table, file_data, crash=True):
@@ -476,7 +526,7 @@ def upload_data_table(file, file_meta, aspect_table, file_data, crash=True):
         assert dataset_id not in db_datasets['dataset_name'], \
             "The database already contains values for dataset_id '%s' in the 'datasets' table" % dataset_id
     else:
-        print("WARNING: The database already contains values for dataset_id '%s'" % dataset_id)
+        print("WARNING: The database already contains values for dataset_id '%s'in the 'datasets' table" % dataset_id)
     assert dataset_id not in db_data_ids, \
         "The database already contains values for dataset_id '%s' in the 'data' table" % dataset_id
     # TODO: There is a bad mismatch between Excel templates and the db's data table. Ugly code ahead.
@@ -505,7 +555,7 @@ def upload_data_table(file, file_meta, aspect_table, file_data, crash=True):
                     level=file_data.columns.names.index(class_name), inplace=True)
         elif class_names.loc[aspect, 'position'][:3] == 'row':
             if len(file_meta['row_classifications'].values) == 1:
-                file_data.index = [str(c) for c in file_data.index]
+                file_data = file_data.rename({c: str(c) for c in file_data.index})
             else:
                 file_data.index.set_levels(
                     [str(i) for i in file_data.index.levels[file_data.index.names.index(class_name)]],
@@ -516,28 +566,34 @@ def upload_data_table(file, file_meta, aspect_table, file_data, crash=True):
                          right_on='attribute%s_oto' % str(int(attribute_no)), how='left')
         assert not any(pd.isna(tmp['i'])), "The correct classification could not be found for '%s'" % class_name
         data.loc[:, class_name] = tmp['i']
-    units = get_unit_table(file, file_meta, file_data.index.names, file_data.columns.names,
-                           file_data.reset_index().melt(file_data.index.names)[file_data.index.names])
-    data['unit_nominator'] = units['nominator']['icol'].apply(int).values
-    data['unit_denominator'] = units['denominator']
+    units = get_unit_table(file, file_meta, file_data.index.names, file_data.columns.names)
+    # TODO: Make sure order is correct
+    #  file_data.reset_index().melt(file_data.index.names)[file_data.index.names])
+    if units['type'] == 'TABLE':
+        data['unit_nominator'] = units['nominator']['icol'].apply(int).values
+        data['unit_denominator'] = units['denominator']['icol'].apply(int).values
+    elif units['type'] == 'GLOBAL':
+        data['unit_nominator'] = units['nominator']
+        data['unit_denominator'] = units['denominator']
     # parse the stats_array_string column
-    # [data.insert(len(data.columns)-1, 'stats_array_%s' % str(n+1), l) for n, l in
-    #  enumerate(parse_stats_array(file_data['stats_array string']))]
-    # data['stats_array_1'], data['stats_array_2'], data['stats_array_3'], data['stats_array_4'] = \
-    #     parse_stats_array(file_data['stats_array string'])
-    # clean up some more mess
-    for c in ['stats_array_1', 'stats_array_2', 'stats_array_3', 'stats_array_4', 'comment']:
-        data[c] = None
+    stats_array = parse_stats_array_table(file, file_meta, file_data.index.names, file_data.columns.names)
+    if stats_array['type'] == 'TABLE':
+        data = pd.concat([data, stats_array['data'].reset_index(drop=True, inplace=True)], axis=1)
+        for c in stats_array['data']:
+            data[c] = stats_array['data'][c].values
+    elif stats_array['type'] == 'GLOBAL':
+        for n, c in enumerate(['stats_array_' + str(i+1) for i in range(4)]):
+            data[c] = stats_array['data'][n]
+        # [data.insert(len(data.columns) - 1, 'stats_array_%s' % str(n + 1), l) for n, l in
+        #  enumerate(stats_array['data'])]
+    comment = get_comment_table(file, file_meta, file_data.index.names, file_data.columns.names)
+    data['comment'] = comment['data']['value'].values
     # TODO: Seems to be a bug!  https://github.com/pandas-dev/pandas/issues/16784
     # data = data.replace(['none'], [None])
     data = data.replace([np.nan], [None])
     # look up values in classification_items
     dbio.bulk_sql_insert('data', sql_columns, data.values.tolist())
     print("Wrote data for '%s', dataset_id: %s" % (dataset_name, dataset_id))
-
-
-
-
 
 
 
