@@ -4,6 +4,7 @@ Functions for file input-output operations.
 
 import os
 
+import xlrd
 import pandas as pd
 
 import IEDC_paths
@@ -53,18 +54,61 @@ def read_candidate_meta(file, path=IEDC_paths.candidates):
 
     :param file: Filename of the file to process
     :param path: Path of the file
-    :return: Dictionary of dataframes for metadata, classifications, and data
+    :return: Dictionary of dataframes for metadata, row_classifications, and data
     """
     # make it a proper path
     file = os.path.join(path, file)
-    meta = pd.read_excel(file, sheet_name='Cover', usecols='C:D',
+    # Check what type of file this is, i.e. LIST or TABLE formatted data
+    workbook = xlrd.open_workbook(file, on_demand=True)
+    worksheet = workbook.sheet_by_name('Cover')
+    data_type = worksheet.cell(9, 6).value  # i.e. cell G10
+    # Get dataset information table on Cover sheet
+    dataset_info = pd.read_excel(file, sheet_name='Cover', usecols='C:D',
                          skiprows=[0, 1], index_col="Column name")
-    classifications = pd.read_excel(file, sheet_name='Cover', usecols='F:G',
-                                    skiprows=[i for i in range(10)], index_col="Aspects_classifications").dropna()
-    return {'meta': meta, 'classifications': classifications}
+    # The `data_sources` metadata should be in the same position for both TABLE and LIST, i.e. F6:H9
+    data_sources = pd.read_excel(file, sheet_name='Cover', usecols='F:H',
+                                 skiprows=[i for i in range(5)], index_col=0, nrows=4,
+                                 header=None, names=['a', 'b'])
+    # Excel templates should be unified for both types in the future :(
+    if data_type == 'TABLE':
+        row_classifications = pd.read_excel(file, sheet_name='Cover', usecols='F:G',
+                                            skiprows=[i for i in range(10)],
+                                            index_col="Row Aspects classification").dropna()
+        col_classifications = pd.read_excel(file, sheet_name='Cover', usecols='H:I',
+                                            skiprows=[i for i in range(10)],
+                                            index_col="Col Aspects classification").dropna()
+        data_info = pd.read_excel(file, sheet_name='Cover', usecols='J:K',
+                                  skiprows=[i for i in range(10)],
+                                  index_col="DATA").dropna()
+        u_nominator = worksheet.cell(6, 7).value  # i.e. cell H7
+        u_denominator = worksheet.cell(6, 8).value  # i.e. cell I7
+    elif data_type == 'LIST':
+        row_classifications = pd.read_excel(file, sheet_name='Cover', usecols='F:G',
+                                            skiprows=[i for i in range(10)],
+                                            index_col="Aspects_classifications").dropna()
+        # Rename values column so it has the same name as the TABLE type. The two templates should be harmonized.
+        row_classifications = row_classifications.rename({'Aspects_Attribute_No': 'Row_Aspects_Attribute_No'})
+        col_classifications = 'LIST'
+        data_info = pd.read_excel(file, sheet_name='Cover', usecols='H:I',
+                                  skiprows=[i for i in range(10)],
+                                  index_col="DATA").dropna()
+        u_nominator = 'LIST'
+        u_denominator = 'LIST'
+    else:
+        raise AssertionError("Unknown data type or malformed Excel file. Cell Cover!G10 should be 'LIST' or 'TABLE',"
+                             " but is '%s'" % data_type)
+    workbook.release_resources()
+    return {'data_type': data_type,
+            'dataset_info': dataset_info,
+            'data_sources': data_sources,
+            'row_classifications': row_classifications,
+            'col_classifications': col_classifications,
+            'data_info': data_info,
+            'u_nominator': u_nominator,
+            'u_denominator': u_denominator}
 
 
-def read_candidate_data(file, path=IEDC_paths.candidates):
+def read_candidate_data_list(file, path=IEDC_paths.candidates):
     """
     Will read a candidate file and return its data.
 
@@ -74,8 +118,36 @@ def read_candidate_data(file, path=IEDC_paths.candidates):
     """
     # make it a proper path
     file = os.path.join(path, file)
-    data = pd.read_excel(file, sheet_name='Values_Master')
+    data = pd.read_excel(file, sheet_name='Data')
     return data
+
+
+def read_candidate_data_table(file, aspects_table, path=IEDC_paths.candidates):
+    """
+    Will read a candidate file and return its data.
+
+    :param file: Filename of the file to process
+    :param path: Path of the file
+    :return: Dictionary of dataframes for metadata, classifications, and data
+    """
+    row_indices = aspects_table[aspects_table['position'].str.startswith('row')].sort_values('position')['name']
+    col_indices = aspects_table[aspects_table['position'].str.startswith('col')].sort_values('position')['name']
+    # make it a proper path
+    file = os.path.join(path, file)
+    data = pd.read_excel(file, sheet_name='Data', header=[i for i in range(len(col_indices))],
+                         index_col=[i for i in range(len(row_indices))])
+    data.columns.names = col_indices
+    data.index.names = row_indices
+    return data
+
+
+def read_units_table(file, row_indices, col_indices, path=IEDC_paths.candidates):
+    file = os.path.join(path, 'TABLE', file)
+    units = pd.read_excel(file, sheet_name='Unit', header=[i for i in range(len(col_indices))],
+                          index_col=[i for i in range(len(row_indices))])
+    units.columns.names = col_indices
+    units.index.names = row_indices
+    return units
 
 
 def read_candidate_files(path=IEDC_paths.candidates):
@@ -85,6 +157,6 @@ def read_candidate_files(path=IEDC_paths.candidates):
     :return: TODO: List of dataframes?
     """
     for file in get_candidate_filenames(path):
-        read_candidate_data(file, path)
+        read_candidate_data_list(file, path)
     # TODO
     return None
