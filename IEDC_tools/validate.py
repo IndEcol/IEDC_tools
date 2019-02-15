@@ -10,26 +10,90 @@ import IEDC_paths
 from IEDC_tools import dbio, file_io, __version__
 
 
-def create_datasets_entry(file_meta):
+def check_datasets_entry(file_meta, create=True, crash_on_exist=True, update=True):
     """
     Creates an entry in the `datasets` table.
+    :param file_meta:
+    :param crash_on_exist:
+    :param update:
+    :param create:
     """
     db_datasets = dbio.get_sql_table_as_df('datasets')
     dataset_info = file_meta['dataset_info']
     # Check if entry already exists
-    db_datasets[['dataset_name', 'dataset_version']].values
-
     dataset_name_ver = [i[0] for i in dataset_info.loc[['dataset_name', 'dataset_version']]
                         .where((pd.notnull(dataset_info.loc[['dataset_name', 'dataset_version']])), None).values]
-    assert dataset_name_ver not in db_datasets[['dataset_name', 'dataset_version']].values, \
-        "Database already contains the following dataset (dataset_name, dataset_version):\n %s" % dataset_name_ver
-    # Sort data / columns
-    pass
-    # Check if any changes
-    pass
-    # Update table
-    #  !! This is beta functionality only !!
+    if dataset_name_ver[1] in ['NULL']:
+        dataset_name_ver[1] = None
+    # If exists already
+    if dataset_name_ver in db_datasets[['dataset_name', 'dataset_version']].values.tolist():
+        if crash_on_exist:
+            raise AssertionError("Database already contains the following dataset (dataset_name, dataset_version):\n %s"
+                                 % dataset_name_ver)
+        elif update:
+            update_dataset_entry(file_meta)
+        else:
+            # do nothing
+            print("Database already contains the following dataset (dataset_name, dataset_version):\n %s"
+                  % dataset_name_ver)
+            return True
+    # if it doesn't exist yet
+    else:
+        if create:
+            create_dataset_entry(file_meta)
+        else:  # i.e. crash_on_not_exist
+            raise AssertionError("Database does not contain the following dataset (dataset_name, dataset_version):\n %s"
+                                 % dataset_name_ver)
+
+
+def create_dataset_entry(file_meta):
+    dataset_info = file_meta['dataset_info']
+    dataset_info = dataset_info.replace([np.nan], [None])
+    dataset_info = dataset_info.replace({'na': None, 'nan': None, 'none': None,
+                                         'NULL': None})
+    dataset_info = dataset_info.to_dict()['Dataset entries']
+    assert dataset_info['dataset_id'] == 'auto', \
+        "Was hoping 'dataset_id' in the file template had the value 'auto'. Not sure what to do now..."
+    # Clean up dict
+    dataset_info.pop('dataset_id')
+    if pd.isna(dataset_info['reserve5']):
+        dataset_info['reserve5'] = 'Created by IEDC_tools v%s' % __version__
+    # Look up stuff
+    data_types = dbio.get_sql_table_as_df('types')
+    dataset_info['data_type'] = data_types.loc[data_types['name'] == dataset_info['data_type']].index[0]
+    data_layers = dbio.get_sql_table_as_df('layers')
+    dataset_info['data_layer'] = data_layers.loc[data_layers['name'] == dataset_info['data_layer']].index[0]
+    data_provenance = dbio.get_sql_table_as_df('provenance')
+    dataset_info['data_provenance'] = data_provenance.loc[data_provenance['name'] ==
+                                                          dataset_info['data_provenance']].index[0]
+    aspects = dbio.get_sql_table_as_df('aspects')
+    class_defs = dbio.get_sql_table_as_df('classification_definition')
+    for aspect in [i for i in dataset_info.keys() if i.startswith('aspect_')]:
+        if dataset_info[aspect] is None or aspect.endswith('classification'):
+            continue
+        if dataset_info[aspect+'_classification'] == 'custom':
+            aspect_class_name = str(dataset_info[aspect]) + '__' + dataset_info['dataset_name']
+            dataset_info[aspect+'_classification'] = \
+                class_defs[class_defs['classification_name'] == aspect_class_name].index[0]
+        dataset_info[aspect] = aspects[aspects['aspect'] == dataset_info[aspect]].index[0]
+    source_type = dbio.get_sql_table_as_df('source_type')
+    dataset_info['type_of_source'] = source_type.loc[source_type['name'] == dataset_info['type_of_source']].index[0]
+    licenses = dbio.get_sql_table_as_df('licences')
+    dataset_info['project_license'] = licenses.loc[licenses['name'] == dataset_info['project_license']].index[0]
+    users = dbio.get_sql_table_as_df('users')
+    dataset_info['submitting_user'] = users.loc[users['name'] == dataset_info['submitting_user']].index[0]
+    # fix some more
+    for k in dataset_info:
+        # not sure why but pymysql doesn't like np.int64
+        if type(dataset_info[k]) == np.int64:
+            dataset_info[k] = int(dataset_info[k])
+    dbio.dict_sql_insert('datasets', dataset_info)
+    print("Created entry for %s in 'datasets' table." % [dataset_info[k] for k in ['dataset_name', 'dataset_version']])
     return None
+
+
+def update_dataset_entry(file_meta):
+    raise NotImplementedError
 
 
 def create_aspects_table(file_meta):
@@ -513,7 +577,7 @@ def get_unit_table(file, file_meta, row_indices, col_indices):
                 else:
                     raise AssertionError("The following unit is not in units table: %s" % u)
                 units[nom_denom].loc[units[nom_denom]['value'] == u, 'icol'] = \
-                    int(db_units.loc[db_units[merge_col] == u]['id'])
+                    int(db_units.loc[db_units[merge_col] == str(u)]['id'])
             # TODO: Remove
             #  res = pd.DataFrame(index=ordered_index.set_index(row_indices).index)
             #  res['nominator'] = units[nom_denom]['value']
@@ -548,6 +612,7 @@ def upload_data_table(file, file_meta, aspect_table, file_data, crash=True):
                                           crash=False, custom_only=False, warn=False)), \
         "Not all classification_ids or attributes found in classification_items"
     dataset_name = file_meta['dataset_info'].loc['dataset_name', 'Dataset entries']
+    # TODO: Need to include the dataset version into the following check
     assert len(db_datasets[db_datasets['dataset_name'] == dataset_name].index.values) > 0, \
         "'%s' has no entry in the table 'datasets'" % dataset_name
     dataset_id = db_datasets[db_datasets['dataset_name'] == dataset_name].index.values[0]
