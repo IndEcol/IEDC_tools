@@ -5,9 +5,11 @@ Functions for file input-output operations.
 import os
 
 import xlrd
+import numpy as np
 import pandas as pd
 
 import IEDC_paths
+from IEDC_tools import dbio
 
 
 def read_input_file(file):
@@ -139,7 +141,10 @@ def read_candidate_data_table(file, aspects_table, path=IEDC_paths.candidates):
     # Check that same column names are not interpreted once as int and once as str
     # https://stackoverflow.com/a/54393368/2075003
     if hasattr(data.columns, 'levels'):
+        # Weird workaroud required https://stackoverflow.com/questions/54393343/harmonise-pandas-multiindex-to-string-when-reading-excel-files/54393368#comment98729305_54393368
+        old_df_codes = data.columns.codes
         data.columns = pd.MultiIndex.from_product([clevel.astype(str).unique() for clevel in data.columns.levels])
+        data.columns.set_codes(old_df_codes, inplace=True)
     else:
         data.columns = data.columns.astype(str).unique()
     data.columns.names = col_indices
@@ -189,3 +194,24 @@ def read_candidate_files(path=IEDC_paths.candidates):
         read_candidate_data_list(file, path)
     # TODO
     return None
+
+
+def ds_in_db(file_meta, crash=True):
+    """
+    Checks if a dataset is already in the database
+    """
+    db_datasets = dbio.get_sql_table_as_df('datasets')
+    indb = db_datasets[['dataset_name', 'dataset_version']].values.tolist()
+    ds_name = file_meta['dataset_info'].loc['dataset_name'].values[0]
+    ds_ver = file_meta['dataset_info'].loc['dataset_version'].values[0]
+    if ds_ver is np.nan:
+        ds_ver = None
+    candidate = [ds_name, ds_ver]
+    if candidate in indb:
+        if crash:
+            raise AssertionError("Dataset already in DB %s" % candidate)
+        print("Dataset already in DB %s" % candidate)
+        return True
+    else:
+        return False
+

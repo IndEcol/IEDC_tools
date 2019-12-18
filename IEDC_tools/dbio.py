@@ -46,7 +46,6 @@ def db_conn(fn):
     return db_conn_
 
 
-
 def db_cursor_write(fn):
     """
     Decorator function for the database cursor (writing)
@@ -104,6 +103,11 @@ def get_sql_table_as_df(conn, table, columns=['*'], db=IEDC_pass.IEDC_database,
     df = pd.read_sql("SELECT %s FROM %s.%s %s;" % (columns, db, table, addSQL),
                      conn, index_col=index)
     return df
+
+
+@db_cursor_write
+def run_this_command(curs, sql_cmd):
+    curs.execute(sql_cmd)
 
 
 @db_cursor_write

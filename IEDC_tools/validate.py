@@ -6,11 +6,11 @@ import time
 import numpy as np
 import pandas as pd
 
-import IEDC_paths
+import IEDC_paths, IEDC_pass
 from IEDC_tools import dbio, file_io, __version__
 
 
-def check_datasets_entry(file_meta, create=True, crash_on_exist=True, update=True):
+def check_datasets_entry(file_meta, create=True, crash_on_exist=True, update=True, replace=False):
     """
     Creates an entry in the `datasets` table.
     :param file_meta:
@@ -32,6 +32,17 @@ def check_datasets_entry(file_meta, create=True, crash_on_exist=True, update=Tru
                                  % dataset_name_ver)
         elif update:
             update_dataset_entry(file_meta)
+        elif replace:
+            # get id
+            if dataset_name_ver[1] == None:
+                db_id = db_datasets.loc[(db_datasets['dataset_name'] == dataset_name_ver[0]) &
+                                        pd.isna(db_datasets['dataset_version'])].index[0]
+            else:
+                db_id = db_datasets.loc[(db_datasets['dataset_name'] == dataset_name_ver[0]) &
+                                        (db_datasets['dataset_version'] == dataset_name_ver[1])].index[0]
+            dbio.run_this_command("DELETE FROM %s.datasets WHERE id = %s;" % (IEDC_pass.IEDC_database, db_id))
+            # add new one
+            create_dataset_entry(file_meta)
         else:
             # do nothing
             print("Database already contains the following dataset (dataset_name, dataset_version):\n %s"
@@ -624,11 +635,6 @@ def upload_data_table(file, file_meta, aspect_table, file_data, crash=True):
         print("WARNING: The database already contains values for dataset_id '%s'in the 'datasets' table" % dataset_id)
     assert dataset_id not in db_data_ids, \
         "The database already contains values for dataset_id '%s' in the 'data' table" % dataset_id
-    # TODO: There is a bad mismatch between Excel templates and the db's data table. Ugly code ahead.
-    more_sql_columns = ['value', 'unit_nominator', 'unit_denominator', 'stats_array_1', 'stats_array_2',
-                        'stats_array_3', 'stats_array_4', 'comment']
-    sql_columns = ['dataset_id'] + [a.replace('_', '') for a in class_names.index] + more_sql_columns
-    # sql_columns = [a + '_oto' if a.startswith('aspect') else a for a in sql_columns]
     # Gotta love Pandas: http://pandas.pydata.org/pandas-docs/stable/generated/pandas.melt.html
     # https://stackoverflow.com/q/53464475/2075003
     data = file_data.reset_index().melt(file_data.index.names)
@@ -689,6 +695,11 @@ def upload_data_table(file, file_meta, aspect_table, file_data, crash=True):
     data = data.replace([np.nan], [None])
     for r in ['na', 'nan']:
         data = data.replace(r, None)
+    # Get column names and order right
+    more_sql_columns = ['value', 'unit_nominator', 'unit_denominator', 'stats_array_1', 'stats_array_2',
+                        'stats_array_3', 'stats_array_4', 'comment']
+    data = data[['dataset_id'] + class_names['name'].to_list() + more_sql_columns]
+    sql_columns = ['dataset_id'] + [a.replace('_', '') for a in class_names.index] + more_sql_columns
     # look up values in classification_items
     dbio.bulk_sql_insert('data', sql_columns, data.values.tolist())
     print("Wrote data for '%s', dataset_id: %s" % (dataset_name, dataset_id))
