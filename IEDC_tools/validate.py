@@ -695,6 +695,13 @@ def upload_data_table(file, file_meta, aspect_table, file_data, crash=True):
     data = data.replace([np.nan], [None])
     for r in ['na', 'nan']:
         data = data.replace(r, None)
+    # Not all classifications have this field yet...
+    if 'Insert_Empty_Cells_as_NULL' in file_meta['data_sources'].index:
+        # Check if NULL values should be skipped or added  https://github.com/IndEcol/IE_data_commons/issues/21
+        if file_meta['data_sources'].loc['Insert_Empty_Cells_as_NULL', 'a'] == 'False':
+            # No entry for empty data points
+            print("`Insert_Empty_Cells_as_NULL` is set to False. Skipping %i empty / NULL values." % len(data[data['value'].isna()]))
+            data = data[data['value'].notna()]
     # Get column names and order right
     more_sql_columns = ['value', 'unit_nominator', 'unit_denominator', 'stats_array_1', 'stats_array_2',
                         'stats_array_3', 'stats_array_4', 'comment']

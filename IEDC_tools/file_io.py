@@ -69,7 +69,7 @@ def read_candidate_meta(file, path=IEDC_paths.candidates):
                          skiprows=[0, 1], index_col="Column name")
     # The `data_sources` metadata should be in the same position for both TABLE and LIST, i.e. F6:H9
     data_sources = pd.read_excel(file, sheet_name='Cover', usecols='F:H',
-                                 skiprows=[i for i in range(5)], index_col=0, nrows=4,
+                                 skiprows=[i for i in range(4)], index_col=0, nrows=5,
                                  header=None, names=['i', 'a', 'b'])
     # Excel templates should be unified for both types in the future :(
     if data_type == 'TABLE':
@@ -206,6 +206,8 @@ def ds_in_db(file_meta, crash=True):
     ds_ver = file_meta['dataset_info'].loc['dataset_version'].values[0]
     if ds_ver is np.nan:
         ds_ver = None
+    else:
+        ds_ver = str(ds_ver)
     candidate = [ds_name, ds_ver]
     if candidate in indb:
         if crash:
