@@ -26,6 +26,7 @@ Credits: Niko Heeren, Stefan Pauliuk
 - [ ] Double check the uploaded data
 - [ ] Routine to apply for entire directory
 - [ ] Function to (chain-) delete classifications from `classification_definitions` *and* `classification_items`
+- [ ] Algorithm to parse table formatted template
 
 - [x] Walkthrough documentation (maybe jupyter notebook)
 - [x] Routine for data upload
