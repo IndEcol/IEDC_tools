@@ -21,11 +21,11 @@ def db_conn(fn):
 
     def db_conn_(*args, **kwargs):
         conn = pymysql.connect(host=IEDC_pass.IEDC_server,
-                               port=IEDC_pass.IEDC_port,
-                               user=IEDC_pass.IEDC_user,
-                               passwd=IEDC_pass.IEDC_pass,
-                               db=IEDC_pass.IEDC_database,
-                               charset="utf8")
+                                port=int(IEDC_pass.IEDC_port),
+                                user=IEDC_pass.IEDC_user,
+                                passwd=IEDC_pass.IEDC_pass,
+                                db=IEDC_pass.IEDC_database,
+                                charset='utf8')
         try:
             rv = fn(conn, *args, **kwargs)
         except (KeyboardInterrupt, SystemExit):
@@ -54,11 +54,11 @@ def db_cursor_write(fn):
 
     def db_cursor_write_(*args, **kwargs):
         conn = pymysql.connect(host=IEDC_pass.IEDC_server,
-                               port=IEDC_pass.IEDC_port,
+                               port=int(IEDC_pass.IEDC_port),
                                user=IEDC_pass.IEDC_user,
                                passwd=IEDC_pass.IEDC_pass,
                                db=IEDC_pass.IEDC_database,
-                               charset="utf8")
+                               charset='utf8')
         curs = conn.cursor()
         try:
             #print curs, args, kwargs

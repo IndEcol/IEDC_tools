@@ -13,10 +13,11 @@ from IEDC_tools import dbio, file_io, __version__
 def check_datasets_entry(file_meta, create=True, crash_on_exist=True, update=True, replace=False):
     """
     Creates an entry in the `datasets` table.
-    :param file_meta:
-    :param crash_on_exist:
-    :param update:
-    :param create:
+    :param file_meta: data file metadata
+    :param crash_on_exist: if True: function terminates with assertion error if dataset/version already exists
+    :param update: if True: function updates dataset entry if dataset/version already exists
+    :param create: if True: funtion creates dataset entry for dataset/version
+    :param replace: if True: delete existing entry in dataset table and create new one with current data
     """
     db_datasets = dbio.get_sql_table_as_df('datasets')
     dataset_info = file_meta['dataset_info']
@@ -26,7 +27,7 @@ def check_datasets_entry(file_meta, create=True, crash_on_exist=True, update=Tru
     if dataset_name_ver[1] in ['NULL']:
         dataset_name_ver[1] = None
     # If exists already
-    if dataset_name_ver in db_datasets[['dataset_name', 'dataset_version']].values.tolist():
+    if dataset_name_ver in db_datasets[['dataset_name', 'dataset_version']].values.tolist(): # dataset name + verion already exists in dataset catalog
         if crash_on_exist:
             raise AssertionError("Database already contains the following dataset (dataset_name, dataset_version):\n %s"
                                  % dataset_name_ver)
@@ -471,6 +472,8 @@ def get_unit_list(file_data):
                                      set(file_data[nom_denom].unique()).difference(db_units['unitcode'].values))
         file_data[nom_denom] = file_data[nom_denom].apply(str)
         tmp = file_data.merge(db_units, left_on=nom_denom, right_on=merge_col, how='left')
+        if len(tmp.index) != len(file_data.index):
+            raise AssertionError("Duplicate entry on (unit nominator,unit denominator) tuple in the unit table. Data upload haltet. Check unit table!")
         assert not any(tmp['id'].isnull()), "The following units do not exist in the units table: %s" % \
                                             file_data[tmp['id'].isnull()][nom_denom].unique()
         # TODO: Causes annoying warning in Pandas. Not sure if relevant: https://stackoverflow.com/q/20625582/2075003
@@ -532,6 +535,8 @@ def upload_data_list(file_meta, aspect_table, file_data, crash=True):
         file_data[class_name] = file_data[class_name].apply(str)
         tmp = file_data.merge(db_classitems2, left_on=class_name, right_on='attribute%s_oto' %
                                                                                str(int(attribute_no)), how='left')
+        if len(tmp.index) != len(data.index):
+            raise AssertionError("The database classification table contains at least one conflicting duplicate entry for the unique attribute attribute%s_oto of classification %s. Data upload halted. Check classification for duplicate entries!" % (str(int(attribute_no)), class_name))        
         data.loc[:, class_name] = tmp['i']
     units = get_unit_list(file_data)
     data['unit nominator'] = units['unit nominator']
@@ -603,6 +608,8 @@ def get_unit_table(file, file_meta, row_indices, col_indices):
 def upload_data_table(file, file_meta, aspect_table, file_data, crash=True):
     """
     Uploads the actual data from the Excel template file (sheet Data) into the database.
+    Dataset entry must already be present in dataset table, use validate.check_datasets_entry to ensure that.
+    Main table data must not contain any values for this dataset id (unique for dataset name and version).
     :param file: Name of the file to read. String.
     :param crash: Will stop if an error occurs
     :return:
@@ -622,19 +629,23 @@ def upload_data_table(file, file_meta, aspect_table, file_data, crash=True):
     assert all(check_classification_items(class_names, file_meta, file_data,
                                           crash=False, custom_only=False, warn=False)), \
         "Not all classification_ids or attributes found in classification_items"
-    dataset_name = file_meta['dataset_info'].loc['dataset_name', 'Dataset entries']
-    # TODO: Need to include the dataset version into the following check
-    assert len(db_datasets[db_datasets['dataset_name'] == dataset_name].index.values) > 0, \
-        "'%s' has no entry in the table 'datasets'" % dataset_name
-    dataset_id = db_datasets[db_datasets['dataset_name'] == dataset_name].index.values[0]
-    if crash:
-        # TODO: Who creates the datasets table? IMO this should cause an error
-        assert dataset_id not in db_datasets['dataset_name'], \
-            "The database already contains values for dataset_id '%s' in the 'datasets' table" % dataset_id
-    else:
-        print("WARNING: The database already contains values for dataset_id '%s'in the 'datasets' table" % dataset_id)
-    assert dataset_id not in db_data_ids, \
-        "The database already contains values for dataset_id '%s' in the 'data' table" % dataset_id
+    dataset_info = file_meta['dataset_info']
+    # Check if entry already exists
+    dataset_name_ver = [i[0] for i in dataset_info.loc[['dataset_name', 'dataset_version']]
+                        .where((pd.notnull(dataset_info.loc[['dataset_name', 'dataset_version']])), None).values]
+    if dataset_name_ver[1] in ['NULL']:
+        dataset_name_ver[1] = None
+    # If the dataset name+version entry does not exist yet
+    if dataset_name_ver not in db_datasets[['dataset_name', 'dataset_version']].values.tolist(): # dataset name + verion already exists in dataset catalog
+        raise AssertionError("Database catalog does not contain the following dataset (dataset_name, dataset_version). Please use validate.check_datasets_entry to ensure that the catalog entry exists before uploading data for: %s"
+                                 % dataset_name_ver)
+    dataset_name = dataset_name_ver[0] # file_meta['dataset_info'].loc['dataset_name',    'Dataset entries']
+    dataset_vers = dataset_name_ver[1] # file_meta['dataset_info'].loc['dataset_version', 'Dataset entries']
+    # get id of dataset_name_ver:
+    dataset_id = db_datasets[(db_datasets['dataset_name'] == dataset_name) & (db_datasets['dataset_version'] == dataset_vers)].index.values[0]
+    # Check that no data are present already in the data table:
+    if dataset_id in db_data_ids:
+         raise AssertionError("The database already contains values for dataset_id '%s' in the 'data' table. This upload is cancelled to avoid conflicts." % dataset_id)
     # Gotta love Pandas: http://pandas.pydata.org/pandas-docs/stable/generated/pandas.melt.html
     # https://stackoverflow.com/q/53464475/2075003
     data = file_data.reset_index().melt(file_data.index.names)
@@ -665,7 +676,9 @@ def upload_data_table(file, file_meta, aspect_table, file_data, crash=True):
         data[class_name] = data[class_name].astype(str)
         tmp = data.merge(db_classitems2, left_on=class_name,
                          right_on='attribute%s_oto' % str(int(attribute_no)), how='left')
-        assert not any(pd.isna(tmp['i'])), "The correct classification could not be found for '%s'" % class_name
+        if len(tmp.index) != len(data.index):
+            raise AssertionError("The database classification table contains at least one conflicting duplicate entry for the unique attribute attribute%s_oto of classification %s. Data upload halted. Check classification for duplicate entries!" % (str(int(attribute_no)), class_name))
+        assert not any(pd.isna(tmp['i'])), "The correct classification could not be found for '%s'" % class_name         
         data.loc[:, class_name] = tmp['i']
     units = get_unit_table(file, file_meta, file_data.index.names, file_data.columns.names)
     if units['type'] == 'TABLE':

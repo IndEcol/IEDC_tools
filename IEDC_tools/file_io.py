@@ -4,7 +4,7 @@ Functions for file input-output operations.
 
 import os
 
-import xlrd
+import openpyxl
 import numpy as np
 import pandas as pd
 
@@ -61,9 +61,9 @@ def read_candidate_meta(file, path=IEDC_paths.candidates):
     # make it a proper path
     file = os.path.join(path, file)
     # Check what type of file this is, i.e. LIST or TABLE formatted data
-    workbook = xlrd.open_workbook(file, on_demand=True)
-    worksheet = workbook.sheet_by_name('Cover')
-    data_type = worksheet.cell(9, 6).value  # i.e. cell G10
+    workbook = openpyxl.load_workbook(file, data_only=True)
+    worksheet = workbook['Cover']
+    data_type = worksheet.cell(10, 7).value  # i.e. cell G10
     # Get dataset information table on Cover sheet
     dataset_info = pd.read_excel(file, sheet_name='Cover', usecols='C:D',
                          skiprows=[0, 1], index_col="Column name")
@@ -82,8 +82,8 @@ def read_candidate_meta(file, path=IEDC_paths.candidates):
         data_info = pd.read_excel(file, sheet_name='Cover', usecols='J:K',
                                   skiprows=[i for i in range(10)],
                                   index_col="DATA").dropna()
-        u_nominator = worksheet.cell(6, 7).value  # i.e. cell H7
-        u_denominator = worksheet.cell(6, 8).value  # i.e. cell I7
+        u_nominator = worksheet.cell(7, 8).value  # i.e. cell H7
+        u_denominator = worksheet.cell(7, 9).value  # i.e. cell I7
     elif data_type == 'LIST':
         row_classifications = pd.read_excel(file, sheet_name='Cover', usecols='F:G',
                                             skiprows=[i for i in range(10)],
@@ -99,7 +99,7 @@ def read_candidate_meta(file, path=IEDC_paths.candidates):
     else:
         raise AssertionError("Unknown data type or malformed Excel file. Cell Cover!G10 should be 'LIST' or 'TABLE',"
                              " but is '%s'" % data_type)
-    workbook.release_resources()
+    workbook.close()
     return {'data_type': data_type,
             'dataset_info': dataset_info,
             'data_sources': data_sources,
