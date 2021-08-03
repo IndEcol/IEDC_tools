@@ -504,18 +504,23 @@ def upload_data_list(file_meta, aspect_table, file_data, crash=True):
                                           crash=False, custom_only=False, warn=False)),\
         "Not all classification_ids or attributes found in classification_items"
     # Time to loop through the file's aspects
-    dataset_name = file_meta['dataset_info'].loc['dataset_name', 'Dataset entries']
-    assert dataset_name in db_datasets['dataset_name'].values, \
-        "'%s' does not exist in the 'datasets' table" % dataset_name
-    dataset_id = db_datasets[db_datasets['dataset_name'] == dataset_name].index.values[0]
-    if crash:
-        # TODO: Who creates the datasets table? IMO this should cause an error
-        assert dataset_id not in db_datasets['dataset_name'], \
-            "The database already contains values for dataset_id '%s' in the 'datasets' table" % dataset_id
-    else:
-        print("WARNING: The database already contains values for dataset_id '%s' in the 'datasets' table" % dataset_id)
-    assert dataset_id not in db_data_ids, \
-        "The database already contains values for dataset_id '%s' in the 'data' table" % dataset_id
+    dataset_info = file_meta['dataset_info']
+    # Check if entry already exists
+    dataset_name_ver = [i[0] for i in dataset_info.loc[['dataset_name', 'dataset_version']]
+                        .where((pd.notnull(dataset_info.loc[['dataset_name', 'dataset_version']])), None).values]
+    if dataset_name_ver[1] in ['NULL']:
+        dataset_name_ver[1] = None
+    # If the dataset name+version entry does not exist yet
+    if dataset_name_ver not in db_datasets[['dataset_name', 'dataset_version']].values.tolist(): # dataset name + verion already exists in dataset catalog
+        raise AssertionError("Database catalog does not contain the following dataset (dataset_name, dataset_version). Please use validate.check_datasets_entry to ensure that the catalog entry exists before uploading data for: %s"
+                                 % dataset_name_ver)
+    dataset_name = dataset_name_ver[0] # file_meta['dataset_info'].loc['dataset_name',    'Dataset entries']
+    dataset_vers = dataset_name_ver[1] # file_meta['dataset_info'].loc['dataset_version', 'Dataset entries']
+    # get id of dataset_name_ver:
+    dataset_id = db_datasets[(db_datasets['dataset_name'] == dataset_name) & (db_datasets['dataset_version'] == dataset_vers)].index.values[0]
+    # Check that no data are present already in the data table:
+    if dataset_id in db_data_ids:
+         raise AssertionError("The database already contains values for dataset_id '%s' in the 'data' table. This upload is cancelled to avoid conflicts." % dataset_id)        
     # TODO: There is a bad mismatch between Excel templates and the db's data table. Ugly code ahead.
     more_df_columns = ['value', 'unit nominator', 'unit denominator', 'comment']
     more_sql_columns = ['value', 'unit_nominator', 'unit_denominator', 'stats_array_1', 'stats_array_2',
