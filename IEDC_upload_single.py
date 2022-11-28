@@ -23,9 +23,7 @@ import IEDC_paths
 #filen = '7_CT_ISO_Regions_to_RECC_v2.4_Regions.xlsx'
 
 ##Filenames_Table: Use validate.upload_data_table to upload
-filen = '1_F_GHG_BySector_RECCv2.4'
-#filen = '1_F_MaterialFlows_RECCv2.4'
-#filen = '1_F_MaterialProduction_RECCv2.4'
+filen = 'Tbd.xlsx'
 
 # Read file metadata (as dictionary)
 file_meta = file_io.read_candidate_meta(filen, path=IEDC_paths.candidates)
